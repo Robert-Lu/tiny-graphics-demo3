@@ -11,7 +11,7 @@ export class Demo3 extends Scene {
 
         // At the beginning of our program, load one of each of these shape definitions onto the GPU.
         this.shapes = {
-            torus: new defs.Torus(15, 15),
+            torus: new defs.Torus(15, 20),
             torus2: new defs.Torus(3, 15),
             sphere: new defs.Subdivision_Sphere(4),
             circle: new defs.Regular_2D_Polygon(1, 15),
@@ -34,6 +34,7 @@ export class Demo3 extends Scene {
             ver1: new Material(new Shader_Version_1(), { color: hex_color("#00ffff") }),
             ver2: new Material(new Shader_Version_2(), { color: hex_color("#00ffff"), second_color: hex_color("#ff0000") }),
             ver3: new Material(new Shader_Version_3(), { color: hex_color("#00ffff") }),
+            ver4: new Material(new Shader_Version_4(), { color: hex_color("#00ffff") }),
         }
 
         this.initial_camera_location = Mat4.look_at(vec3(0, 5, 5), vec3(0, 0, 0), vec3(0, 1, 0));
@@ -77,8 +78,8 @@ export class Demo3 extends Scene {
         // // Shader Example 1
         // this.shapes.torus.draw(context, program_state, Mat4.scale(1, 1, 0.2), this.materials.ver1);
 
-        // Shader Example 2
-        this.shapes.torus.draw(context, program_state, Mat4.scale(1, 1, 0.2), this.materials.ver2);
+        // // Shader Example 2
+        // this.shapes.torus.draw(context, program_state, Mat4.scale(1, 1, 0.2), this.materials.ver2);
 
         // // Shader Example 3
         // let model_transformation = Mat4.translation(3 * Math.sin(t), 0, 0).times(
@@ -91,6 +92,12 @@ export class Demo3 extends Scene {
             Mat4.scale(1, 1, 0.2)
         );
         this.shapes.torus.draw(context, program_state, model_transformation, this.materials.ver3);
+
+        // Shader Example 5
+        let model_transformation_5 = Mat4.translation(3 * Math.sin(t), 0, -1.5).times(
+            Mat4.scale(1, 1, 0.2)
+        );
+        this.shapes.torus.draw(context, program_state, model_transformation_5, this.materials.ver4);
 
         // // Subdivisions
         // this.shapes.s1.draw(context, program_state, Mat4.translation(-3, 0, 0), this.materials.test);
@@ -273,6 +280,65 @@ class Shader_Version_3 extends Shader {
                 float factor = 0.5 + 0.5 * sin(position_OCS.x * 10.0 + position_OCS.y * 10.0);
                 vec4 mixed_color =  vec4(shape_color.xyz, factor);
                 gl_FragColor = mixed_color;
+            } `;
+    }
+
+    update_GPU(context, gpu_addresses, graphics_state, model_transform, material) {
+        // update_GPU():  Defining how to synchronize our JavaScript's variables to the GPU's:
+        const [P, C, M] = [graphics_state.projection_transform, graphics_state.camera_inverse, model_transform],
+            PCM = P.times(C).times(M);
+        context.uniformMatrix4fv(gpu_addresses.model_transform, false, Matrix.flatten_2D_to_1D(model_transform.transposed()));
+        context.uniformMatrix4fv(gpu_addresses.projection_camera_model_transform, false,
+            Matrix.flatten_2D_to_1D(PCM.transposed()));
+
+        // Set uniform parameters
+        context.uniform4fv(gpu_addresses.shape_color, material.color);
+    }
+}
+
+class Shader_Version_4 extends Shader {
+    constructor() {
+        super();
+    }
+
+    shared_glsl_code() {
+        // ********* SHARED CODE, INCLUDED IN BOTH SHADERS *********
+        return ` 
+        precision mediump float;
+        
+        varying vec4 position_OCS;
+        varying vec4 vertex_color;  // <-----
+        `;
+    }
+
+    vertex_glsl_code() {
+        // ********* VERTEX SHADER *********
+        return this.shared_glsl_code() + `
+            attribute vec3 position, normal;       
+            
+            uniform mat4 model_transform;
+            uniform mat4 projection_camera_model_transform;
+            uniform vec4 shape_color;  // <--- moved to vertex shader.
+    
+            void main(){                                                                   
+                // The vertex's final resting place (in NDCS):
+                gl_Position = projection_camera_model_transform * vec4( position, 1.0 ); 
+                position_OCS = vec4( position, 1.0 );
+
+                // Calculate vertex color.
+                float factor = 0.5 + 0.5 * sin(position_OCS.x * 10.0 + position_OCS.y * 10.0);
+                vec4 mixed_color =  vec4(shape_color.xyz, factor);
+                vertex_color = mixed_color;
+            } `;
+    }
+
+    fragment_glsl_code() {
+        // ********* FRAGMENT SHADER *********
+        return this.shared_glsl_code() + `
+            // uniform vec4 shape_color;   <--- moved to vertex shader.
+        
+            void main(){              
+                gl_FragColor = vertex_color;   // <--- in fragment shader, only "forward" the vertex color
             } `;
     }
 
